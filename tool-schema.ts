@@ -389,6 +389,12 @@ export const toolParameters = Type.Object({
 			updateMaxChars: Type.Optional(
 				Type.Number({ description: "Max chars per update (default: 1500)" }),
 			),
+			outputMode: Type.Optional(
+				Type.Union([
+					Type.Literal("raw-delta"),
+					Type.Literal("screen-delta"),
+				], { description: "What to send in periodic parent updates. raw-delta sends stripped PTY bytes since last update (legacy). screen-delta sends only changed viewport rows, which is much quieter for full-screen TUIs like Claude Code." }),
+			),
 			maxTotalChars: Type.Optional(
 				Type.Number({ description: "Total char budget for all updates (default: 100000). Updates stop including content when exhausted." }),
 			),
@@ -475,6 +481,7 @@ export interface ToolParams {
 		quietThreshold?: number;
 		gracePeriod?: number;
 		updateMaxChars?: number;
+		outputMode?: "raw-delta" | "screen-delta";
 		maxTotalChars?: number;
 		autoExitOnQuiet?: boolean;
 	};

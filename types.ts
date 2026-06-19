@@ -40,9 +40,13 @@ export interface HandsFreeUpdate {
 	status: "running" | "user-takeover" | "exited" | "killed" | "agent-resumed";
 	sessionId: string;
 	runtime: number;
+	/** Incremental update payload. In screen-delta mode this is a viewport diff, not raw PTY history. */
 	tail: string[];
 	tailTruncated: boolean;
 	userTookOver?: boolean;
+	outputMode?: "raw-delta" | "screen-delta";
+	cursor?: string;
+	previousCursor?: string;
 	// Budget tracking
 	totalCharsSent?: number;
 	budgetExhausted?: boolean;
@@ -146,6 +150,11 @@ export interface InteractiveShellOptions {
 	handsFreeQuietThreshold?: number;
 	handsFreeUpdateMaxChars?: number;
 	handsFreeMaxTotalChars?: number;
+	/**
+	 * raw-delta: emit stripped PTY bytes since last update (legacy, good for line-oriented commands).
+	 * screen-delta: emit only changed viewport rows since last update (best for full-screen TUIs like Claude Code).
+	 */
+	handsFreeUpdateOutputMode?: "raw-delta" | "screen-delta";
 	onHandsFreeUpdate?: (update: HandsFreeUpdate) => void;
 	// Auto-exit when output stops (for agents that don't exit on their own)
 	autoExitOnQuiet?: boolean;

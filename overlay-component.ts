@@ -1,3 +1,6 @@
+import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
 import { stripVTControlCharacters } from "node:util";
 import type { Component, Focusable, TUI } from "@mariozechner/pi-tui";
 import { matchesKey, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
@@ -18,6 +21,10 @@ import {
 } from "./types.js";
 import { captureCompletionOutput, captureTransferOutput, maybeBuildHandoffPreview, maybeWriteHandoffSnapshot } from "./handoff-utils.js";
 import { createSessionQueryState, getSessionOutput } from "./session-query.js";
+
+function resolveAgentDir(): string {
+	return process.env.PI_AGENT_DIR ?? join(homedir(), ".pi", "agent");
+}
 
 export class InteractiveShellOverlay implements Component, Focusable {
 	focused = false;
@@ -54,6 +61,9 @@ export class InteractiveShellOverlay implements Component, Focusable {
 	private updateMode: "on-quiet" | "interval";
 	private quietTimer: ReturnType<typeof setTimeout> | null = null;
 	private hasUnsentData = false;
+	private screenDeltaSnapshot: string[] | null = null;
+	private screenDeltaSeq = 0;
+	private screenDeltaTranscriptPath: string | null = null;
 	// Non-blocking mode: track status for agent queries
 	private completionResult: InteractiveShellResult | undefined;
 	private queryState = createSessionQueryState();
@@ -451,14 +461,21 @@ export class InteractiveShellOverlay implements Component, Focusable {
 
 		const maxChars = this.options.handsFreeUpdateMaxChars ?? this.config.handsFreeUpdateMaxChars;
 		const maxTotalChars = this.options.handsFreeMaxTotalChars ?? this.config.handsFreeMaxTotalChars;
+		const outputMode = this.options.handsFreeUpdateOutputMode ?? "raw-delta";
 
 		let tail: string[] = [];
 		let truncated = false;
+		let cursor: string | undefined;
+		let previousCursor: string | undefined;
 
 		// Only include content if budget not exhausted
 		if (!this.budgetExhausted) {
-			// Get incremental output since last update
-			let newOutput = this.session.getRawStream({ sinceLast: true, stripAnsi: true });
+			const delta = outputMode === "screen-delta"
+				? this.buildScreenDeltaUpdate()
+				: { text: this.session.getRawStream({ sinceLast: true, stripAnsi: true }), cursor: undefined, previousCursor: undefined };
+			let newOutput = delta.text;
+			cursor = delta.cursor;
+			previousCursor = delta.previousCursor;
 
 			// Truncate if exceeds per-update limit
 			if (newOutput.length > maxChars) {
@@ -492,9 +509,89 @@ export class InteractiveShellOverlay implements Component, Focusable {
 			runtime: Date.now() - this.startTime,
 			tail,
 			tailTruncated: truncated,
+			outputMode,
+			cursor,
+			previousCursor,
 			totalCharsSent: this.totalCharsSent,
 			budgetExhausted: this.budgetExhausted,
 		});
+	}
+
+	private getScreenDeltaTranscriptPath(): string {
+		if (this.screenDeltaTranscriptPath) return this.screenDeltaTranscriptPath;
+		const baseDir = join(resolveAgentDir(), "cache", "interactive-shell");
+		mkdirSync(baseDir, { recursive: true });
+		const safeSessionId = (this.sessionId ?? `pid${this.session.pid}`).replace(/[^A-Za-z0-9_.-]/g, "_");
+		this.screenDeltaTranscriptPath = join(baseDir, `screen-delta-${safeSessionId}.md`);
+		writeFileSync(
+			this.screenDeltaTranscriptPath,
+			[
+				`# interactive-shell screen deltas (${safeSessionId})`,
+				`time: ${new Date().toISOString()}`,
+				`command: ${this.options.command}`,
+				`cwd: ${this.options.cwd ?? ""}`,
+				"",
+			].join("\n"),
+			{ encoding: "utf-8" },
+		);
+		return this.screenDeltaTranscriptPath;
+	}
+
+	private appendScreenDeltaTranscript(text: string): void {
+		if (!text.trim()) return;
+		appendFileSync(this.getScreenDeltaTranscriptPath(), `${text}\n\n`, { encoding: "utf-8" });
+	}
+
+	private buildScreenDeltaUpdate(): { text: string; cursor?: string; previousCursor?: string } {
+		const previous = this.screenDeltaSnapshot;
+		const current = this.session.getViewportLines({ ansi: false }).map((line) => line.trimEnd());
+		this.screenDeltaSnapshot = current;
+
+		const previousCursor = this.screenDeltaSeq > 0 ? `S${this.screenDeltaSeq}` : undefined;
+		this.screenDeltaSeq += 1;
+		const cursor = `S${this.screenDeltaSeq}`;
+		const transcriptPath = this.getScreenDeltaTranscriptPath();
+		const attachHint = this.sessionId ? `full live view: interactive_shell({ attach: "${this.sessionId}" }); delta history: ${transcriptPath}` : `full live view: attach to session; delta history: ${transcriptPath}`;
+
+		if (!previous) {
+			const visible = current.filter((line) => line.trim().length > 0);
+			if (visible.length === 0) return { text: "", cursor, previousCursor };
+			const text = [`Initial screen ${cursor} (${attachHint})`, ...visible].join("\n");
+			this.appendScreenDeltaTranscript(text);
+			return {
+				text,
+				cursor,
+				previousCursor,
+			};
+		}
+
+		const max = Math.max(previous.length, current.length);
+		const groups: Array<{ start: number; end: number }> = [];
+		let i = 0;
+		while (i < max) {
+			if ((previous[i] ?? "") === (current[i] ?? "")) {
+				i += 1;
+				continue;
+			}
+			const start = i;
+			while (i < max && (previous[i] ?? "") !== (current[i] ?? "")) i += 1;
+			groups.push({ start, end: i - 1 });
+		}
+
+		if (groups.length === 0) return { text: "", cursor, previousCursor };
+
+		const parts = [`Continued from ${previousCursor ?? "S0"} to ${cursor} (screen delta; ${attachHint})`];
+		for (const group of groups) {
+			parts.push(`@@ rows ${group.start + 1}-${group.end + 1} @@`);
+			for (let row = group.start; row <= group.end; row++) {
+				const line = current[row] ?? "";
+				if (line.trim().length === 0) continue;
+				parts.push(`${String(row + 1).padStart(2, "0")}: ${line}`);
+			}
+		}
+		const text = parts.join("\n");
+		this.appendScreenDeltaTranscript(text);
+		return { text, cursor, previousCursor };
 	}
 
 	private triggerUserTakeover(): void {

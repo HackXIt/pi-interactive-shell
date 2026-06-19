@@ -890,6 +890,7 @@ export default function interactiveShellExtension(pi: ExtensionAPI) {
 							handsFreeUpdateInterval: handsFree?.updateInterval,
 							handsFreeQuietThreshold: handsFree?.quietThreshold,
 							handsFreeUpdateMaxChars: handsFree?.updateMaxChars,
+							handsFreeUpdateOutputMode: handsFree?.outputMode,
 							handsFreeMaxTotalChars: handsFree?.maxTotalChars,
 							autoExitOnQuiet: mode === "dispatch"
 								? handsFree?.autoExitOnQuiet !== false
@@ -963,6 +964,7 @@ export default function interactiveShellExtension(pi: ExtensionAPI) {
 						handsFreeUpdateInterval: handsFree?.updateInterval,
 						handsFreeQuietThreshold: handsFree?.quietThreshold,
 						handsFreeUpdateMaxChars: handsFree?.updateMaxChars,
+						handsFreeUpdateOutputMode: handsFree?.outputMode,
 						handsFreeMaxTotalChars: handsFree?.maxTotalChars,
 						autoExitOnQuiet: handsFree?.autoExitOnQuiet,
 						autoExitGracePeriod: handsFree?.gracePeriod ?? config.autoExitGracePeriod,
@@ -999,6 +1001,9 @@ export default function interactiveShellExtension(pi: ExtensionAPI) {
 										sessionId: update.sessionId,
 										runtime: update.runtime,
 										newChars: update.tail.join("\n").length,
+										outputMode: update.outputMode,
+										cursor: update.cursor,
+										previousCursor: update.previousCursor,
 										totalCharsSent: update.totalCharsSent,
 										budgetExhausted: update.budgetExhausted,
 										userTookOver: update.userTookOver,
@@ -1480,6 +1485,7 @@ export default function interactiveShellExtension(pi: ExtensionAPI) {
 								handsFreeUpdateInterval: handsFree?.updateInterval,
 								handsFreeQuietThreshold: handsFree?.quietThreshold,
 								handsFreeUpdateMaxChars: handsFree?.updateMaxChars,
+								handsFreeUpdateOutputMode: handsFree?.outputMode,
 								handsFreeMaxTotalChars: handsFree?.maxTotalChars,
 								autoExitOnQuiet: mode === "dispatch"
 									? handsFree?.autoExitOnQuiet !== false

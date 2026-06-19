@@ -258,6 +258,25 @@ interactive_shell({ sessionId: "calm-reef", inputPaste: "multi\nline\ncode" })
 interactive_shell({ sessionId: "calm-reef", input: "y", inputKeys: ["enter"] })  // combine text + keys
 ```
 
+### Parent update output modes
+
+For hands-free periodic updates, choose the payload shape with `handsFree.outputMode`:
+
+- `raw-delta` (default): stripped PTY bytes since the last update. Best for line-oriented commands.
+- `screen-delta`: only changed viewport rows since the last update. Best for full-screen TUIs like Claude Code, Cursor, and Pi itself because redraws do not spam the parent with the whole screen/history.
+
+Example for Claude Code bridge-style work:
+
+```typescript
+interactive_shell({
+  command: 'claude "Do the task"',
+  mode: "hands-free",
+  handsFree: { outputMode: "screen-delta", updateMaxChars: 1200, maxTotalChars: 12000 }
+})
+```
+
+Screen-delta updates include cursors such as `S1 -> S2`, an attach hint, e.g. `interactive_shell({ attach: "calm-reef" })`, and a live delta-history file under `~/.pi/agent/cache/interactive-shell/screen-delta-<session>.md`, so the parent receives only the delta while the full live TUI/history remains available.
+
 ### Query Output
 
 Status queries return **rendered terminal output** (what's actually on screen), not raw stream:

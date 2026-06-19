@@ -1,3 +1,6 @@
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { InteractiveShellConfig } from "../config.js";
 
@@ -39,7 +42,7 @@ function stripAnsi(value: string): string {
 	return value.replace(/\x1b\[[0-9;]*m/g, "");
 }
 
-function createExistingSession() {
+function createExistingSession(viewport: string[] = ["echo hello"]) {
 	let handlers: { onData?: (data: string) => void; onExit?: () => void } = {};
 	return {
 		pid: 4242,
@@ -52,7 +55,7 @@ function createExistingSession() {
 		},
 		resize: vi.fn(),
 		scrollToBottom: vi.fn(),
-		getViewportLines: vi.fn(() => ["echo hello"]),
+		getViewportLines: vi.fn(() => viewport),
 		isScrolledUp: vi.fn(() => false),
 		write: vi.fn(),
 		scrollUp: vi.fn(),
@@ -102,6 +105,57 @@ describe("InteractiveShellOverlay render focus cues", () => {
 		vi.doUnmock("../session-manager.js");
 		vi.doUnmock("../handoff-utils.js");
 		vi.doUnmock("../session-query.js");
+	});
+
+	it("emits compact screen deltas for hands-free updates", async () => {
+		const agentDir = mkdtempSync(join(tmpdir(), "pi-interactive-shell-test-"));
+		const previousAgentDir = process.env.PI_AGENT_DIR;
+		process.env.PI_AGENT_DIR = agentDir;
+		try {
+			const { InteractiveShellOverlay } = await loadOverlay();
+			const viewport = ["Claude", "Working on task", ""];
+			const session = createExistingSession(viewport);
+			const updates: any[] = [];
+			const overlay = new InteractiveShellOverlay(
+				{ terminal: { columns: 120, rows: 40 }, requestRender: vi.fn() } as any,
+				{
+					fg: (_color: string, text: string) => text,
+					bg: (_color: string, text: string) => text,
+					bold: (text: string) => text,
+				} as any,
+				{
+					command: "claude",
+					existingSession: session as any,
+					mode: "hands-free",
+					sessionId: "delta-test",
+					handsFreeUpdateOutputMode: "screen-delta",
+					onHandsFreeUpdate: (update) => updates.push(update),
+				},
+				config,
+				() => {},
+			);
+
+			(overlay as any).emitHandsFreeUpdate();
+			viewport[1] = "Done";
+			(overlay as any).emitHandsFreeUpdate();
+
+			expect(updates).toHaveLength(2);
+			expect(updates[0].outputMode).toBe("screen-delta");
+			expect(updates[0].cursor).toBe("S1");
+			expect(updates[0].tail.join("\n")).toContain("Initial screen S1");
+			expect(updates[1].previousCursor).toBe("S1");
+			expect(updates[1].cursor).toBe("S2");
+			expect(updates[1].tail.join("\n")).toContain("Continued from S1 to S2");
+			expect(updates[1].tail.join("\n")).toContain("02: Done");
+
+			const transcript = readFileSync(join(agentDir, "cache", "interactive-shell", "screen-delta-delta-test.md"), "utf-8");
+			expect(transcript).toContain("Initial screen S1");
+			expect(transcript).toContain("Continued from S1 to S2");
+		} finally {
+			if (previousAgentDir === undefined) delete process.env.PI_AGENT_DIR;
+			else process.env.PI_AGENT_DIR = previousAgentDir;
+			rmSync(agentDir, { recursive: true, force: true });
+		}
 	});
 
 	it("shows distinct badges and border styles for focused and unfocused states", async () => {
