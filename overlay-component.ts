@@ -548,14 +548,14 @@ export class InteractiveShellOverlay implements Component, Focusable {
 		this.screenDeltaSnapshot = current;
 
 		const previousCursor = this.screenDeltaSeq > 0 ? `S${this.screenDeltaSeq}` : undefined;
-		this.screenDeltaSeq += 1;
-		const cursor = `S${this.screenDeltaSeq}`;
 		const transcriptPath = this.getScreenDeltaTranscriptPath();
 		const attachHint = this.sessionId ? `full live view: interactive_shell({ attach: "${this.sessionId}" }); delta history: ${transcriptPath}` : `full live view: attach to session; delta history: ${transcriptPath}`;
 
 		if (!previous) {
 			const visible = current.filter((line) => line.trim().length > 0);
-			if (visible.length === 0) return { text: "", cursor, previousCursor };
+			if (visible.length === 0) return { text: "", previousCursor };
+			this.screenDeltaSeq += 1;
+			const cursor = `S${this.screenDeltaSeq}`;
 			const text = [`Initial screen ${cursor} (${attachHint})`, ...visible].join("\n");
 			this.appendScreenDeltaTranscript(text);
 			return {
@@ -578,8 +578,10 @@ export class InteractiveShellOverlay implements Component, Focusable {
 			groups.push({ start, end: i - 1 });
 		}
 
-		if (groups.length === 0) return { text: "", cursor, previousCursor };
+		if (groups.length === 0) return { text: "", previousCursor };
 
+		this.screenDeltaSeq += 1;
+		const cursor = `S${this.screenDeltaSeq}`;
 		const parts = [`Continued from ${previousCursor ?? "S0"} to ${cursor} (screen delta; ${attachHint})`];
 		for (const group of groups) {
 			parts.push(`@@ rows ${group.start + 1}-${group.end + 1} @@`);
